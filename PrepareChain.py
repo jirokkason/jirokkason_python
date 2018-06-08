@@ -17,6 +17,7 @@ make_tripletはforの中で実行されているので、形態素解析され�
 
 import re
 import MeCab
+import sqlite3
 from collections import defaultdict
 
 
@@ -28,8 +29,8 @@ class PrepareChain:
     BEGIN = "__BEGIN_SENTENCE__"
     END = "__END_SENTENCE__"
 
-    DB_PATH = "chain.db"
-    DB_SCHEMA_PATH = "schema.sql"
+    DB_PATH = "jirokkason.db"
+    DB_SCHEMA_PATH = "markov_schema.sql"
 
     def __init__(self, text):
         """
@@ -62,6 +63,8 @@ class PrepareChain:
             for triplet, count in triplets.items():
                 triplet_freqs[triplet] += 1
 
+        return triplet_freqs
+
     # 長い文章をセンテンスごとに分割
     def _divide(self, text):
         """
@@ -70,11 +73,10 @@ class PrepareChain:
         :return: 句読点などで区切られた、一文ずつの配列
         """
         # 改行文字以外の分割文字(正規表現)
-        delimiter = "。 |．|\."
+        delimiter = "[|．|\.]+"
 
         # すべての分割文字を改行文字に置換(splitした時に「。」などの文字をなくさないため。)
-        text = re.sub("({0})".format(delimiter), "\1\n", text)
-
+        text = re.sub(delimiter, "\1\n", text)
         # splitlinesで先ほど置換した改行文字で分割
         sentences = text.splitlines()
         # stripで前後の空白文字を削除
@@ -90,6 +92,7 @@ class PrepareChain:
         :return: 形態素で分割された配列
         """
         morphemes = []  # 分かち書きした単語を入れる配列
+        self.tagger.parse("")  # unicode対策で先にparse。
         node = self.tagger.parseToNode(sentence)  # MeCabで分かち書き。-Ochasenを指定しているのでparseToNodeメソッドを使用。
         while node:
             if node.posid != 0:
@@ -127,11 +130,36 @@ class PrepareChain:
         triplet_freqs[triplet] = 1
 
         # endを追加
-        triplet = (morphemes[-1], morphemes[-2], PrepareChain.END)
+        triplet = (morphemes[-2], morphemes[-1], PrepareChain.END)
         triplet_freqs[triplet] = 1
 
         return triplet_freqs  # 一文毎の３つ区切り:countのdictを返す。
 
+
+    def save(self, triplet_freqs, init=False):
+        """
+        三つ組ごとに出現回数をDBに保存。カラムは(prefix1, prefix2, suffix, freq)
+        :param triplet_freqs: 三つ組とその出現回数が集まった辞書 key: 三つ組(タプル) val:出現回数
+        :param init: DBを初期化するかどうか。
+        :return:
+        """
+        # DBオープン
+        con = sqlite3.connect(PrepareChain.DB_PATH)
+
+        # DBの初期化から始める場合
+        if init:
+            # schema.sqlを開き、sqlite3の中で実行
+            with open(PrepareChain.DB_SCHEMA_PATH, "r") as f:
+                schema = f.read()
+                con.executescript(schema)
+
+        # データ整形。triplet_freqsのキーのtupleを外してバラし、freqをひとまとめにしたtupleを１要素としてlistに再代入
+        datas = [(triplet[0], triplet[1], triplet[2], freq) for (triplet, freq) in triplet_freqs.items()]
+
+        # DBに保存。datasにはすべてのカラムがまとまったtuple一つ一つが繰り返し自動的に入る。
+        p_statement = "insert into chain_freqs (prefix1, prefix2, suffix, freq) values (?, ?, ?, ?)"
+        con.executemany(p_statement, datas)  # executemanyはexecuteの複数形なので、tupleがいっぱい集まったlistなどのイテレータを扱える。
+        con.commit()
 
 if __name__ == '__main__':
     text = "さてだいぶ食ってるハズですが・・・おいおい麺はいつ終わるんだ(汗)食っても食ってもエンドレスな。消耗してきた麺欲。めんどいから箸で掴むもん構わず口に運ぶとキャベツが結構邪魔だ・・・芯とな部分がボリューム増しな印象にしてくれるので・・・そう言えばコチラ本山の麺は噂通り柔め！と言うよりヌメリが凄い。だから重量感がある！麺の長さもえらく短い。ショートなんで箸を突っ込む回数が多い。いやぁマジで苦しくなってきた。早々に大満足の豚ちゃんは胃袋ダイブさせてるので問題ないが・・・だからヤサイが邪魔なんだよ今日に関しては。手こずると予想してたからコールをしないつもりだったのに・・・よりによってヤサイマシですから。ヘルプッ！！どこで潜ましてたか判らなかったニンニクを探すべく・・・エイッ！とかき混ぜる！フワッと鼻腔を突いてきたよ！OK！スープに新たな味が生まれてくる。心地良いニンニクの力！熱で焼けてる感のある油をより駆り立てて豚骨醤油と交わる。まるでニンニク強めの生姜焼き時の肉から脂から出る油がヤバい時と同じだ！右手に。箸を持つ手に元気が宿る！脳の麺欲が！このＪ欲がスパートをかけるぅ～！キャベツの芯とは無理せずフィニッシュ！！ラストはスープを飲みたいぜ！一回ゴクリ。。。二回目ゴクリ・・・ご馳走様でした～！！デンジャラスオイリー本山豚旨スープ！胸が焼け・・・焦げそうだ(笑)"

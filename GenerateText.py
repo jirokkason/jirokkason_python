@@ -1,145 +1,168 @@
 """
-与えられた文書からマルコフ連鎖のためのチェーン（連鎖）を作成して、DBに保存するファイル。
-マルコフ連鎖が「ある状態が起こる確率が、その直前の状態から決まる」ことなので、「直前の言葉」に対応した「ある言葉」を定義して保存しておく。
-ただし、直前の言葉:ある言葉が1:1だと、 一番短い繋がりが2単語となってしまい、意味の通る文になりにくいので、
-直前の言葉1(prefix1)と直前の言葉2(prefix2):ある言葉(Suffix) というふうに2:1対応で考える。
-
-要するに、このプログラムではマルコフ連鎖モンテカルロ法を起こすための前処理=>DB保存という処置を行う。
-
-1.文章を三つ組にするメソッド、make_triplet_freqsを実行し、その最中に文章を改行ごとに切り分ける(_devide)。その時、句読点や記号は邪魔なので\nに置換する。
-2.__init__時に定義したMeCabのタガーを使い_morphological_analysisで文を形態素解析。
-3._make_tripletで形態素解析が行われた元々文だった単語を三つ区切りにし、その三つの単語が文中何回来るかをカウント。
-make_tripletはforの中で実行されているので、形態素解析された一文が送られて来るので、それの始まりと終わりに一文の開始と終了をあわらす文字列を追加。
-返り値は、一文ごとの単語と、その単語の出現回数。
-4.あらかじめ定義して置いた辞書triplet_freqsに「三つ区切りの単語がはいったtuple」をkey、「その単語三つの出現回数」をvalueとして保存。
-5.
+マルコフ連鎖を用いて入力から適当な文章を自動生成するファイル
 """
 
-import re
-import MeCab
+import os.path
 import sqlite3
-from collections import defaultdict
+import random
 
+from PrepareChain import PrepareChain
 
-class PrepareChain:
+class GenerateText:
     """
-    チェーンを作成してDBに保存するクラス
+    文章生成クラス
     """
 
-    BEGIN = "__BEGIN_SENTENCE__"
-    END = "__END_SENTENCE__"
-
-    DB_PATH = "chain.db"
-    DB_SCHEMA_PATH = "schema.sql"
-
-    def __init__(self, text):
+    def __init__(self, n=10):
         """
         初期化メソッド
-        :param text: 文章。これを形態素解析=> (３組): カウント という風に分割していく。
+        :param n: 文章をいくつ生成するか
         """
-        # if isinstance(text, str):  # isinstanceメソッドは、第一引数に渡したオブジェクトが第二引数に渡した型かどうか判定するメソッド。
-        #     text = text.decode("utf-8")
-        self.text = text
+        self.n = n
 
-        # 形態素解析用タガー
-        self.tagger = MeCab.Tagger("-Ochasen")
-
-    # 3個:countの辞書型を作るメソッド
-    def make_triplet_freqs(self):
+    def generate(self):
         """
-        形態素解析 ~ 三つ組までの処理をまとめたメソッド。
-        :return: ３つ組とその出現回数の辞書 key: 三つ組(タプル) val: 出現回数
+        文章を生成する処理をまとめたメソッド。
+        :return: 生成された文章
         """
 
-        sentences = self._divide(self.text)  # 長い文章をセンテンスごとに分割。
+        # 最終的に出来上がる文章
+        generated_text = ""
 
-        # 3つ組の出現回数
-        # defaultdict 辞書型に新しいkeyを追加するときの場合分けがいらなくなるモジュール
-        triplet_freqs = defaultdict(int)
+        # 単語毎の状態変異が保存されたDBと接続
+        con = sqlite3.connect(PrepareChain.DB_PATH)
+        con.row_factory = sqlite3.Row # 通常、sqliteのデータはlist（数値）で帰ってくるが、このメソッドによりカラム名で取得可能
 
-        # 文章の三つ区切りゾーン。一文毎に分かち書き、単語３つ区切り: count という処理を行っていることに注意
-        for sentence in sentences:
-            morphemes = self._morphological_analysis(sentence)  # 一文を分かち書きし、配列化
-            triplets = self._make_triplet(morphemes)  # 分かち書き単語順3つ区切りで取得する
-            # 辞書を繰り返し処理。一文毎だったのを全体でまとめるため、それぞれのcountの和を取る
-            for triplet, count in triplets.items():
-                triplet_freqs[triplet] += 1
+        # 指定の数だけ文章を繋げる。n回分BEGIN~ENDを繰り返した文章を取得。
+        for i in range(self.n):
+            text = self._generate_sentence(con)
+            generated_text += text
 
-    # 長い文章をセンテンスごとに分割
-    def _divide(self, text):
+        # DBクローズ
+        con.close()
+
+        return generated_text
+
+    def _generate_sentence(self, con):
         """
-        「。」や改行などで区切られた長い文章を一文ずつに分ける
-        :param text: 分割前の文章
-        :return: 句読点などで区切られた、一文ずつの配列
+        ランダムに一文を生成する処理をまとめたもの
+        :param con: DB接続のためのコネクション
+        :return: 生成された一つの文章
         """
-        # 改行文字以外の分割文字(正規表現)
-        delimiter = "。 |．|\."
 
-        # すべての分割文字を改行文字に置換(splitした時に「。」などの文字をなくさないため。)
-        text = re.sub("({0})".format(delimiter), "\1\n", text)
+        # 生成文章のリスト
+        morphemes = []
 
-        # splitlinesで先ほど置換した改行文字で分割
-        sentences = text.splitlines()
-        # stripで前後の空白文字を削除
-        sentences = [s.strip() for s in sentences]
+        # 文章の始まりを取得。BEGIN_SENTENSEとなっているところからランダムに取得。返り値はtuple
+        first_triplet = self._get_first_triplet(con)
+        morphemes.append(first_triplet[1])
+        morphemes.append(first_triplet[2])
 
-        return sentences
+        # 続きの文章を取得。__END_SENTENCE__がくるまで繰り返し。
+        while morphemes[-1] != PrepareChain.END:
+            # ここで、マルコフ連鎖の理論が適用されて、一個ずれの三つ組の単語で考えているので、前の三つ組のprefix2,suffixが次のprefix1,2となる。
+            # 要するにmorphemesの後ろから二番目、後ろから一番目をprefixとする
+            prefix1 = morphemes[-2]
+            prefix2 = morphemes[-1]
+            triplet = self._get_triplet(con, prefix1, prefix2)  # prefix1,2から次の単語を取得するメソッド
+            # tupleで次の三つ組が帰ってくるので、そのsuffixのみを取得
+            morphemes.append(triplet[2])
 
-    # 分かち書きメソッド
-    def _morphological_analysis(self, sentence):
+        # morphemesにBEGIN~ENDまでランダムに取得した文字列が格納されているので、連結
+        result = "".join(morphemes[:-1])
+
+        return result
+
+    def _get_first_triplet(self, con):
         """
-        文を形態素解析する。
-        :param sentence: 一文
-        :return: 形態素で分割された配列
+        文章の始まりの三つ組をランダムに取得
+        :param con: DB接続のためのコネクション
+        :return: 文章の始まりの三つ組のタプル
         """
-        morphemes = []  # 分かち書きした単語を入れる配列
-        # sentence = sentence.encode("utf-8")
-        node = self.tagger.parseToNode(sentence)  # MeCabで分かち書き。-Ochasenを指定しているのでparseToNodeメソッドを使用。
-        while node:
-            if node.posid != 0:
-                morpheme = node.surface  # parseToNodeで取得した時はsurfaceで単語が取得できる。decode("utf-8)の必要有りかも。
-                morphemes.append(morpheme)
-            node = node.next  # イテレータなのでnextメソッドで次に行く。
-        return morphemes
+        # dbのカラムが(prefix1, prefix2, suffix...)となっているので、始まりの文章はprefix1が__BEGIN_SENTENCE__となっていること
+        # なので、BEGINをprefix1としてチェーンを取得するためのtupleを定義
+        prefixes = (PrepareChain.BEGIN, )
 
-    # 単語三つ区切り、回数の辞書作成
-    def _make_triplet(self, morphemes):
+        # prefix1がBEGINとなっているチェーンを配列で取得。この要素からランダムに選んでいく。
+        chains = self._get_chain_from_DB(con, prefixes)
+        # 始まりの三つ組が格納されているchainsから、ランダムに一つ取得
+        triplet = self._get_probable_triplet(chains)
+
+        # idとfreqsはいらないので、文字列だけ返させる。
+        return (triplet["prefix1"], triplet["prefix2"], triplet["suffix"])
+
+    def _get_triplet(self, con, prefix1, prefix2):
         """
-        形態素解析で分割された配列を、言葉順三つ区切りの一個ずれずつで取得し、その出現回数を数える
-        :param morphemes: 形態素配列
-        :return: 3つ組とその出現回数の辞書 key: (sen1, sen2, sen3) val: 出現回数
+        prefix1,prefix2からsuffixをランダムに取得
+        :param con: DBと接続するためのコネクション
+        :param prefix1:
+        :param prefix2:
+        :return: 3つ組のtuple
         """
-        # 三つ組を作れない場合は終わる。
-        if len(morphemes) < 3:
-            return {}
+        # suffixを取得するためprefix1,2を代入したtupleを作成
+        prefixes = (prefix1, prefix2, )
 
-        # （一文の中での）単語の出現回数をカウントするためのdict
-        triplet_freqs = defaultdict(int)
+        # prefix1,prefix2が引数の値と等しいチェーンを配列で取得。この要素からランダムに選んでいく。
+        chains = self._get_chain_from_DB(con, prefixes)
+        # print(chains)
 
-        # 一文内の単語ごとに繰り返し処理。三つ区切りなので、-2
-        for i in range(len(morphemes) - 2):
-            triplet = tuple(morphemes[i:i + 3])  # 辞書のkeyの作成。三つ区切りなので i:i+3
-            triplet_freqs[triplet] += 1  # 単語の並びが一致していたらカウント。なければdefaultdictにより新規作成
+        # 取得したチェーンから、確率的に一つ選ぶ
+        triplet =self._get_probable_triplet(chains)
 
-        # ここまでで三つ区切り：countの処理は完了した。
-        # だが、最終的には全文dbにまとめて保存してしまうため、「一文の開始、終了地点」という情報が失われてしまう。
-        # なので、一文を表しているmorphemesの先頭に__BEGIN_SENTENCE__,
-        # 終了地点に__END_SENTENCE__という記号を追加する。
+        # idとfreqsはいらないので、文字列だけ返させる。
+        return (triplet["prefix1"], triplet["prefix2"], triplet["suffix"])
 
-        # beginを追加。スコープの外なので、classから呼び出す。
-        triplet = (PrepareChain.BEGIN, morphemes[0], morphemes[1])
-        triplet_freqs[triplet] = 1
+    def _get_probable_triplet(self, chains):
+        """
+        チェーンの配列の中から確率的に一つを返す。
+        :param chains: チェーンの配列
+        :return: ランダムに選んだ三つ組
+        """
+        # 確率配列。（単語の頻度によって確率が変わるので）ここに三つ組が入っているchainsから取得するためのindexを入れ直す。
+        # probability = []
 
-        # endを追加
-        triplet = (morphemes[-1], morphemes[-2], PrepareChain.END)
-        triplet_freqs[triplet] = 1
+        # freqが高い、つまり複数回文章に出てきている単語はその分高確率でなくてはならない
+        # 各三つ組のindexを、「freqの値分」probabilityに代入。
+        # for index, chain in enumerate(chains):
+        #     for _ in range(chain["freq"]):
+        #         probability.append(index)
 
-        return triplet_freqs  # 一文毎の３つ区切り:countのdictを返す。
+
+        probability = [index for index, chain in enumerate(chains) for _ in range(chain["freq"])]
+        # print(probability)
+        # chainを選ぶためのindexをランダムに取得
+
+        chain_index = random.choice(probability)
+
+        return chains[chain_index]
+
+    def _get_chain_from_DB(self, con, prefixes):
+        """
+        チェーンの情報をDBから取得。
+        始まりの位置だけ取得する時はprefix1のみがくるが、それ以外はprefix1,prefix2二つのvalueを用いて検索することに注意。
+        :param con: DBと接続するためのコネクション
+        :param prefixes: チェーンを取得するためのprefixの条件。tupleかlist
+        :return: チェーンの情報の配列。
+        """
+        # ベーシックの検索sql。BEGINを検索する時はこれ
+        sql = "select prefix1, prefix2, suffix, freq from chain_freqs where prefix1 = ?"
+        # 途中の三つ組を検索する時がprefixが二つなので、条件に加える
+        if len(prefixes) == 2:
+            sql += "and prefix2 = ?"
+
+        # 結果を格納するlist
+        result = []
+
+        # DBから取得。第一引数に入れたsql文の?の部分にprefixesの値が入る。
+        cursor = con.execute(sql, prefixes)
+        for row in cursor:
+            # if len(prefixes) == 1:
+            #     print(dict(row))
+            result.append(dict(row))
+
+        return result
 
 
 if __name__ == '__main__':
-    text = "さてだいぶ食ってるハズですが・・・おいおい麺はいつ終わるんだ(汗)食っても食ってもエンドレスな。消耗してきた麺欲。めんどいから箸で掴むもん構わず口に運ぶとキャベツが結構邪魔だ・・・芯とな部分がボリューム増しな印象にしてくれるので・・・そう言えばコチラ本山の麺は噂通り柔め！と言うよりヌメリが凄い。だから重量感がある！麺の長さもえらく短い。ショートなんで箸を突っ込む回数が多い。いやぁマジで苦しくなってきた。早々に大満足の豚ちゃんは胃袋ダイブさせてるので問題ないが・・・だからヤサイが邪魔なんだよ今日に関しては。手こずると予想してたからコールをしないつもりだったのに・・・よりによってヤサイマシですから。ヘルプッ！！どこで潜ましてたか判らなかったニンニクを探すべく・・・エイッ！とかき混ぜる！フワッと鼻腔を突いてきたよ！OK！スープに新たな味が生まれてくる。心地良いニンニクの力！熱で焼けてる感のある油をより駆り立てて豚骨醤油と交わる。まるでニンニク強めの生姜焼き時の肉から脂から出る油がヤバい時と同じだ！右手に。箸を持つ手に元気が宿る！脳の麺欲が！このＪ欲がスパートをかけるぅ～！キャベツの芯とは無理せずフィニッシュ！！ラストはスープを飲みたいぜ！一回ゴクリ。。。二回目ゴクリ・・・ご馳走様でした～！！デンジャラスオイリー本山豚旨スープ！胸が焼け・・・焦げそうだ(笑)"
-    chain = PrepareChain(text)
-    triplet_freqs = chain.make_triplet_freqs()
-    # chain.save(triplet_freqs, True)
-    # chain.show(triplet_freqs)
+    generator = GenerateText()
+    print(generator.generate())

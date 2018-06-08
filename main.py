@@ -1,43 +1,58 @@
 from __future__ import absolute_import
 from __future__ import unicode_literals
-import jiro_db
-import jiro_scraping
-import jiro_doc2vec
+import re
+from jiro_scraping import Scraping
+from PrepareChain import PrepareChain
+from GenerateText import GenerateText
 
 
 def scraping_and_save():
-    copype_url1 = "https://matome.naver.jp/odai/2139244522734938601"
-    copype_url2 = "https://matome.naver.jp/odai/2138389040041091701"
-    copype_url3 = "https://matome.naver.jp/odai/2135502414433224101"
-    # jiro_scraping_text = jiro_scraping.Scraping(copype_url1, "p", "mdMTMWidget01ItemTxt01View")
-    # jiro_scraping_title = jiro_scraping.Scraping(copype_url1, "p", "mdMTMWidget01ItemTtl01View")
-    # jiro_scraping_text = jiro_scraping.Scraping(copype_url2, "p", "mdMTMWidget01ItemTxt01View")
-    # jiro_scraping_title = jiro_scraping.Scraping(copype_url2, "p", "mdMTMWidget01ItemTtl01View")
-    jiro_scraping_text = jiro_scraping.Scraping(copype_url3, "q", "mdMTMWidget01ItemQuote01Txt")
-    jiro_scraping_title = jiro_scraping.Scraping(copype_url3, "p", "mdMTMWidget01ItemTtl01View")
+    copype_url = "https://matome.naver.jp/odai/2139244522734938601" # 8
+    # copype_url = "https://matome.naver.jp/odai/2138389040041091701" # 2
+    # copype_url = "https://matome.naver.jp/odai/2135502414433224101" # 2
+    jiro_scraping_text = Scraping(copype_url, "p", "mdMTMWidget01ItemTxt01View", None, 8)
+    jiro_scraping_title = Scraping(copype_url, "p", "mdMTMWidget01ItemTtl01View", None, 8)
+    # jiro_scraping_text = Scraping(copype_url, "p", "mdMTMWidget01ItemTxt01View", None, 2)
+    # jiro_scraping_title = Scraping(copype_url, "p", "mdMTMWidget01ItemTtl01View", None, 2)
+    # jiro_scraping_text = Scraping(copype_url, "q", "mdMTMWidget01ItemQuote01Txt", None, 2)
+    # jiro_scraping_title = Scraping(copype_url, "p", "mdMTMWidget01ItemTtl01View", None, 2)
     print("scrape body")
-    body_list = jiro_scraping_text.scraping(3)
+    body_list = jiro_scraping_text.scraping()
     print("scrape title")
-    title_list = jiro_scraping_title.scraping(3)
-
-    print("insert db")
-    for i, (title, body) in enumerate(zip(title_list, body_list)):
-        jiro_data = jiro_db.DB("root", "", "jirokkason")
+    title_list = jiro_scraping_title.scraping()
+    data = [(title, body, copype_url) for title, body in zip(title_list, body_list)]
+    jiro_scraping_text.save(data, True)
 
 
-        jiro_data.insert("insert into jiro_copype (title, body) values (%s, %s);", (title, body))
+def text_to_prepare_chain():
+    # マルコフ連鎖のためにデータ整形 => chain_freqsテーブルに保存
+    select_data = Scraping()
+    text_list = select_data.show()
+    # すべての文字列を結合。改行で一文とみなす
+    texts = []
+    [texts.append(text) for text_tuple in text_list for text in text_tuple]
+    chain = PrepareChain("\n".join(texts))
+    triplet_freqs = chain.make_triplet_freqs()
+    chain.save(triplet_freqs, True)
 
 
-def main():
-    print("select db")
-    jiro_data = jiro_db.DB("root", "", "jirokkason")
-    data = jiro_data.select("select body from jiro_copype")
-    print(len(data))
-    for d in data:
-        doc = d[0]
-        jiro_doc2vec.split_into_words(doc)
+def main(sentence_length):
+    generator = GenerateText(sentence_length)
+    print(re.sub("^\d{4}/\d{1,2}/\d{1,2}/\d{1,2}$" ,"" , generator.generate()
+          .replace("。", "。\n")
+          .replace("「", " ")
+          .replace("」", " ")
+          .replace("(", " ")
+          .replace("）", " ")
+          .replace("(", " ")
+          .replace(")", " ")
+          .replace("『", " ")
+          .replace("』", " ")
+                 )
+          )
 
 
 if __name__ == "__main__":
-    main()
     # scraping_and_save()
+    # text_to_prepare_chain()
+    main(1)
