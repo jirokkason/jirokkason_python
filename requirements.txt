@@ -35,7 +35,6 @@ cycler==0.10.0
 Cython==0.27.3
 cytoolz==0.9.0
 dask==0.16.1
-datashape==0.5.4
 decorator==4.2.1
 distributed==1.20.2
 docutils==0.14
@@ -43,17 +42,9 @@ entrypoints==0.2.3
 et-xmlfile==1.0.1
 fastcache==1.0.2
 filelock==2.0.13
-Flask==0.12.2
-Flask-Cors==3.0.3
-gensim==3.4.0
 gevent==1.2.2
 glob2==0.6
 gmpy2==2.0.8
-google-api-core==1.1.1
-google-api-python-client==1.6.6
-google-auth==1.4.1
-google-cloud-speech==0.33.0
-googleapis-common-protos==1.5.3
 greenlet==0.4.12
 grpcio==1.11.0
 h5py==2.7.1
