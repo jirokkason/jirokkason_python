@@ -36,12 +36,13 @@ class GenerateText:
         # 指定の数だけ文章を繋げる。n回分BEGIN~ENDを繰り返した文章を取得。
         for i in range(self.n):
             text = self._generate_sentence(con)
-            generated_text += text
+            generated_text += text + "\n---------------------------------------------------------------------------\n"
 
         # DBクローズ
         con.close()
 
         return generated_text
+
 
     def _generate_sentence(self, con):
         """
