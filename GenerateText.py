@@ -7,6 +7,8 @@ import sqlite3
 import random
 
 from PrepareChain import PrepareChain
+DB_PATH = "/Users/matsumotokazuki/Desktop/jirokkason/jirokkason_python/jirokkason.db"
+DB_SCHEMA_PATH = "/Users/matsumotokazuki/Desktop/jirokkason/jirokkason_python/markov_schema.sql"
 
 class GenerateText:
     """
@@ -30,13 +32,13 @@ class GenerateText:
         generated_text = ""
 
         # 単語毎の状態変異が保存されたDBと接続
-        con = sqlite3.connect(PrepareChain.DB_PATH)
+        con = sqlite3.connect(DB_PATH)
         con.row_factory = sqlite3.Row # 通常、sqliteのデータはlist（数値）で帰ってくるが、このメソッドによりカラム名で取得可能
 
         # 指定の数だけ文章を繋げる。n回分BEGIN~ENDを繰り返した文章を取得。
         for i in range(self.n):
             text = self._generate_sentence(con)
-            generated_text += text + "\n---------------------------------------------------------------------------\n"
+            generated_text += text
 
         # DBクローズ
         con.close()

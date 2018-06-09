@@ -29,8 +29,8 @@ class PrepareChain:
     BEGIN = "__BEGIN_SENTENCE__"
     END = "__END_SENTENCE__"
 
-    DB_PATH = "jirokkason.db"
-    DB_SCHEMA_PATH = "markov_schema.sql"
+    DB_PATH = "/Users/matsumotokazuki/Desktop/jirokkason/jirokkason_python/jirokkason.db"
+    DB_SCHEMA_PATH = "/Users/matsumotokazuki/Desktop/jirokkason/jirokkason_python/markov_schema.sql"
 
     def __init__(self, text):
         """
